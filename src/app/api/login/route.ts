@@ -5,6 +5,15 @@ export const dynamic = "force-dynamic";
 
 const attempts = new Map<string, { n: number; until: number }>();
 
+/**
+ * Redirect with a relative Location. Behind `tailscale serve`, req.url is
+ * http://localhost:3100/..., so an absolute redirect built from it would
+ * send the phone to localhost.
+ */
+function go(location: string) {
+  return new NextResponse(null, { status: 303, headers: { Location: location } });
+}
+
 function safeNext(v: FormDataEntryValue | null): string {
   const s = typeof v === "string" ? v : "";
   return s.startsWith("/") && !s.startsWith("//") ? s : "/review";
@@ -13,11 +22,9 @@ function safeNext(v: FormDataEntryValue | null): string {
 export async function POST(req: Request) {
   const form = await req.formData();
   const next = safeNext(form.get("next"));
-  const url = new URL(req.url);
-  const back = (err: string) =>
-    NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(next)}&error=${err}`, url), 303);
+  const back = (err: string) => go(`/login?next=${encodeURIComponent(next)}&error=${err}`);
 
-  if (!authEnabled()) return NextResponse.redirect(new URL(next, url), 303);
+  if (!authEnabled()) return go(next);
 
   // Slow down guessing: five wrong tries locks this client out for five minutes.
   const who = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
@@ -31,11 +38,12 @@ export async function POST(req: Request) {
   }
   attempts.delete(who);
   const s = makeSession(approverName());
-  const res = NextResponse.redirect(new URL(next, url), 303);
+  const res = go(next);
   res.cookies.set(COOKIE, s.value, {
     httpOnly: true,
     sameSite: "lax",
-    secure: url.protocol === "https:",
+    // Behind `tailscale serve` the app sees plain http on localhost; trust the proxy's header.
+    secure: (req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "")) === "https",
     path: "/",
     maxAge: s.maxAge,
   });
