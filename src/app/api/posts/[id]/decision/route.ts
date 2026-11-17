@@ -13,8 +13,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const actor = readSession((await cookies()).get(COOKIE)?.value);
   if (!actor) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
   // Same-origin only, so another site can't make a signed-in phone approve something.
+  // Behind `tailscale serve`, compare with the host the phone actually used.
   const origin = req.headers.get("origin");
-  if (origin && new URL(origin).host !== req.headers.get("host"))
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+  if (origin && new URL(origin).host !== host)
     return NextResponse.json({ error: "Cross-site request refused" }, { status: 403 });
 
   const { id } = await params;
