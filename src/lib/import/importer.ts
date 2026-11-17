@@ -4,6 +4,7 @@ import path from "node:path";
 import type { DB } from "../db";
 import type { BrandConfig } from "../brands";
 import { localToUtc } from "../time";
+import { targetsFor as brandTargets } from "../targets";
 import { parseCsvObjects } from "./csv";
 import { parseCaptionFile } from "./captions";
 import { mapQueue, type ImportedPost, type LegacyStateEntry, type Part } from "./queue";
@@ -82,10 +83,6 @@ export function importBrand(
   });
   warnings.push(...mapped.warnings);
 
-  const channels = db
-    .prepare("SELECT id, platform FROM channels WHERE brand_id = ? AND active = 1")
-    .all(brandId) as { id: number; platform: string }[];
-
   const summary: ImportSummary = {
     brand: brand.slug,
     created: 0,
@@ -98,7 +95,9 @@ export function importBrand(
 
   const q = {
     find: db.prepare("SELECT * FROM posts WHERE brand_id = ? AND external_id = ?"),
-    humanDecided: db.prepare("SELECT 1 FROM decisions WHERE post_id = ? AND actor <> 'import' LIMIT 1"),
+    humanDecided: db.prepare(
+      "SELECT 1 FROM decisions WHERE post_id = ? AND actor <> 'import' AND undone_at IS NULL LIMIT 1",
+    ),
     latestVersion: db.prepare(
       "SELECT id, number, content_hash FROM versions WHERE post_id = ? ORDER BY number DESC LIMIT 1",
     ),
@@ -134,15 +133,7 @@ export function importBrand(
       WHERE publish_jobs.source = 'legacy-import' AND publish_jobs.post_id = excluded.post_id`),
   };
 
-  const targetsFor = (parts: Part[]) => {
-    const out: { channelId: number; part: Part }[] = [];
-    for (const part of parts) {
-      // Postiz can't post Facebook stories, so a story only targets Instagram (flagged on the card).
-      const platforms = part === "story" ? ["instagram"] : ["facebook", "instagram"];
-      for (const c of channels) if (platforms.includes(c.platform)) out.push({ channelId: c.id, part });
-    }
-    return out;
-  };
+  const targetsFor = (parts: Part[]) => brandTargets(db, brandId, parts);
 
   const hashOf = (p: ImportedPost) =>
     crypto
@@ -181,7 +172,12 @@ export function importBrand(
         for (const j of p.legacyJobs) q.upsertJob.run({ postId, ...j, now: nowIso });
       };
 
-      const existing = q.find.get(brandId, p.externalId) as { id: number; state: string } | undefined;
+      const existing = q.find.get(brandId, p.externalId) as { id: number; state: string; source: string } | undefined;
+      if (existing?.source === "api") {
+        // A maker sent this post straight to Pinch; the old queue no longer owns it.
+        summary.skipped.push({ row: p.row, postId: p.externalId, reason: "managed in Pinch now (sent through the maker API)" });
+        continue;
+      }
       if (!existing) {
         const { id } = q.insertPost.get(fields) as { id: number };
         const versionId = addVersion(id, 1, "Imported from the old queue");

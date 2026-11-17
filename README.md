@@ -6,17 +6,17 @@ This is **phase 1 (foundation)**: the data model, a read-only importer for the A
 
 ## Rules built in
 
-- **Nothing posts without Nath's yes.** Phase 1 has no way to post at all; publishing arrives in phase 3 behind the day-of confirm.
+- **Nothing posts without Nath's yes.** Pinch has no way to post yet; publishing arrives in phase 3 behind the day-of confirm. A yes counts only for the exact version Nath saw: a new version from a maker goes back to review. Posts the old queue marked ready still show in Review as "Needs your yes" until Nath approves them in Pinch.
 - **Never mix Andar and Nest.** Each brand reads only its own folder. Post ids must match the brand's pattern (`A…` for Andar, anything else for Nest), so an Andar id in Nest's queue is skipped, not imported. Media paths can't leave the brand folder, and the database refuses to point a post at another brand's channel.
 - **Mac mini only.** Run it there, next to Postiz, private over Tailscale.
 
 ## Run it on the Mac mini
 
 ```bash
-cp .env.example .env          # set the two brand folders
+cp .env.example .env          # brand folders, passcode, secret, maker token
 npm ci
 npm run import                # reads both queues, read-only
-npm run build && npm start    # http://localhost:3000/calendar
+npm run build && npm start    # http://localhost:3000/review
 ```
 
 Or with Docker (brand folders mounted read-only):
@@ -29,7 +29,7 @@ docker compose exec pinch npm run import
 tailscale serve --bg --https=8445 http://127.0.0.1:3100
 ```
 
-Run the import again whenever the queues change; it's safe to repeat. A cron every 15 minutes is fine until makers post straight to Pinch in phase 2.
+Run the import again whenever the queues change; it's safe to repeat. A cron every 15 minutes is fine. Posts a maker has sent through the maker API belong to Pinch from then on; the importer skips them.
 
 ## What the importer reads
 
@@ -53,22 +53,47 @@ How queue status maps to a Pinch state:
 
 Card flags: check this fact today, Reel has no sound, Facebook story is manual, unfinished caption (`TBD`, `[PRICE`…), missing file, off-slot time, queue/Postiz mismatch, and drafts that still need the old `andar yes`.
 
+## Review (phase 2)
+
+`/review` is a stack of cards, soonest slot first: new and revised posts from makers, posts changed in the old queue after a decision, and ready posts with no yes yet. Swipe right to approve, left to drop, up to send back with a note; "Later" moves a card to the back; Undo stays for 10 seconds. Keyboard: arrows, and `u` to undo. `/revisions` lists what was sent back, with the note.
+
+Sign in with `PINCH_PASSCODE`. The session cookie lasts 30 days; five wrong tries lock that client out for five minutes.
+
+## Maker API
+
+Makers send posts with `Authorization: Bearer $PINCH_MAKER_TOKEN` and, optionally, `X-Pinch-Maker: <name>`. Makers can't approve anything.
+
+```bash
+curl -X POST https://<mac-mini>:8445/api/posts \
+  -H "Authorization: Bearer $PINCH_MAKER_TOKEN" -H "X-Pinch-Maker: ac" \
+  -H "Content-Type: application/json" -d '{
+    "brand": "andar", "externalId": "A40", "date": "2026-11-20", "time": "12:00",
+    "title": "Workshop open day", "caption": "…",
+    "media": [{ "part": "feed", "path": "Posts/A40/a40 1 - feed.png" }],
+    "checks": ["Confirm the Saturday date"], "note": "what changed (for a revision)"
+  }'
+```
+
+- `media[].path` is relative to the brand's folder and must exist there. `part` is `feed`, `story` or `reel`.
+- The id must match the brand's pattern. Sending an id that already exists adds a new version and puts it back in review. A post already scheduled or posted returns 409.
+- `GET /api/posts?state=revise[&brand=andar]` lists posts sent back, with the latest note. `GET /api/posts/:id` returns one post with its versions and decisions.
+
 ## Data model
 
-`db/migrations/001_init.sql`: Brand → Channel; Post → Version → Media; Post → channels per part; Decision (every swipe, plus import records); Publish job (Postiz post ids and status); Import run.
+`db/migrations/001_init.sql`: Brand → Channel; Post → Version → Media; Post → channels per part; Decision (every swipe, plus import records); Publish job (Postiz post ids and status); Import run. `002_review.sql` adds undo tracking to decisions.
 
 ## Develop
 
 ```bash
-npm test          # parsers and importer, against fixtures in tests/fixtures
+npm test          # parsers, importer, review and maker API, against fixtures in tests/fixtures
 npm run typecheck
 npm run dev
 ```
 
 ## Phases
 
-1. **Foundation** (this): data model, importer, Calendar.
-2. Review stack: swipe to approve, reject, revise with a comment, undo; maker API `POST /api/posts`.
+1. Foundation: data model, importer, Calendar.
+2. **Review stack** (this): swipe to approve, reject, revise with a comment, undo; maker API `POST /api/posts`.
 3. Day-of confirm and publishing: Today screen, Postiz API worker, status polling, 08:00 Telegram nudge. Then switch Andar over.
 4. Nest move: Threads channel, a week side by side, then retire the old Nest pieces.
 5. Polish: Health screen, token reminders, Reel sound, MCP server for makers.

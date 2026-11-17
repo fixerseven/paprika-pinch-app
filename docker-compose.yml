@@ -6,6 +6,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3100:3000"   # local only; Tailscale publishes it to your devices
+    environment:
+      PINCH_PASSCODE: "${PINCH_PASSCODE:?set PINCH_PASSCODE}"
+      PINCH_SECRET: "${PINCH_SECRET:?set PINCH_SECRET}"
+      PINCH_APPROVER_NAME: "${PINCH_APPROVER_NAME:-nath}"
+      PINCH_MAKER_TOKEN: "${PINCH_MAKER_TOKEN:-}"
     volumes:
       - pinch-data:/data
       # The brand folders are mounted read-only, so Pinch can't change the old queues.

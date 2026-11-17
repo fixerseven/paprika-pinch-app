@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
+import Nav from "./Nav";
 
 export const metadata: Metadata = {
   title: "Pinch",
@@ -27,13 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Link href="/calendar" className="wordmark">
             Pinch
           </Link>
-          <nav aria-label="Screens">
-            <span className="nav-soon" title="Coming in phase 3">Today</span>
-            <span className="nav-soon" title="Coming in phase 2">Review</span>
-            <Link href="/calendar" className="nav-on">
-              Calendar
-            </Link>
-          </nav>
+          <Nav />
         </header>
         <main>{children}</main>
       </body>

@@ -34,6 +34,8 @@ export interface LegacyJob {
 }
 
 export interface ImportedPost {
+  /** Line number in the CSV (header is line 1). */
+  row: number;
   externalId: string;
   localDate: string;
   localTime: string;
@@ -207,6 +209,7 @@ export function mapQueue(rows: Record<string, string>[], ctx: MapContext): MapRe
     }
 
     posts.push({
+      row: rowNo,
       externalId: postId,
       localDate: row.date,
       localTime: row.time,
