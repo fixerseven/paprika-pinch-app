@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getDb } from "@/lib/db";
+import { requireApprover } from "@/lib/session";
 import { getCalendar, lastImports, listBrands, type CalendarPost } from "@/lib/queries";
 import { PLATFORM_SHORT, STATE_LABEL, STATE_ORDER, formatDay, formatWhen } from "@/lib/labels";
 import { addDays, todayIn } from "@/lib/time";
@@ -12,6 +13,7 @@ type Search = Promise<{ brand?: string; past?: string }>;
 
 export default async function CalendarPage({ searchParams }: { searchParams: Search }) {
   const { brand, past } = await searchParams;
+  await requireApprover("/calendar");
   const db = getDb();
   const brands = listBrands(db);
   const activeBrand = brands.some((b) => b.slug === brand) ? brand : undefined;

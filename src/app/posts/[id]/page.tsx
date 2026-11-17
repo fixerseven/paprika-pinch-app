@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getPost } from "@/lib/queries";
+import { requireApprover } from "@/lib/session";
 import { PLATFORM_SHORT, STATE_LABEL, formatDay, formatWhen } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
 export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await requireApprover(`/posts/${id}`);
   const data = getPost(getDb(), Number(id));
   if (!data) notFound();
   const { post, version, media, versions, channels, decisions, jobs } = data;

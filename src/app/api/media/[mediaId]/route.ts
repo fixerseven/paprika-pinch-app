@@ -3,6 +3,8 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { getDb } from "@/lib/db";
 import { brandRoot, loadBrandConfig } from "@/lib/brands";
+import { cookies } from "next/headers";
+import { COOKIE, readSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ const TYPES: Record<string, string> = {
  * the brand's root, so an Andar post can never show a Nest file or vice versa.
  */
 export async function GET(req: Request, { params }: { params: Promise<{ mediaId: string }> }) {
+  if (!readSession((await cookies()).get(COOKIE)?.value)) return new Response("Sign in first", { status: 401 });
   const { mediaId } = await params;
   const row = getDb()
     .prepare(
