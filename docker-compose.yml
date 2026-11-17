@@ -1,0 +1,16 @@
+# Runs next to Postiz on the Mac mini. Reach it over Tailscale only:
+#   tailscale serve --bg --https=8445 http://127.0.0.1:3100
+services:
+  pinch:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"   # local only; Tailscale publishes it to your devices
+    volumes:
+      - pinch-data:/data
+      # The brand folders are mounted read-only, so Pinch can't change the old queues.
+      - "${PINCH_ANDAR_ROOT}:/brands/andar:ro"
+      - "${PINCH_NEST_ROOT}:/brands/nest:ro"
+
+volumes:
+  pinch-data:

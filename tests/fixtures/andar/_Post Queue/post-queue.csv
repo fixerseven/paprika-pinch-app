@@ -1,0 +1,6 @@
+date,time,track,post_id,title,feed_file,story_file,reel_file,caption_file,status,owner,notes
+2026-11-18,19:00,Owners,A2-21,"₱500,000 in one InstaPay transfer.",Posts/Test/feed/a2-21 - feed.png,Posts/Test/stories/a2-21 - story.png,,Posts/Test/Captions.md#A2-21,ready,content,"Approved by Nath. Check the morning it posts: On the morning: confirm the ₱500,000 InstaPay limit is still current."
+2026-11-26,12:00,Owners,A29,Carousel: three slides,Posts/Test/feed/a29 1 - feed.png;Posts/Test/feed/a29 2 - feed.png;Posts/Test/feed/a29 3 - feed.png,,,Posts/Test/Captions.md#A29,ready,content,"Carousel, post slides in order 1 to 3."
+2026-11-27,12:00,Owners,A30,Reel post,,Posts/Test/stories/a30 - story.png,Posts/Test/reels/a30 - reel.mp4,Posts/Test/Captions.md#A30,ready,content,Silent Reel: add a sound when posting.
+2026-11-28,12:00,Owners,B99,Wrong brand row,Posts/Test/feed/x.png,,,,ready,content,
+2026-11-29,12:00,Owners,A31,Escapes the folder,../Nest Workspaces/Designs/x - feed.png,,,Posts/Test/Captions.md#A31,ready,content,
