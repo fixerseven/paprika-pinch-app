@@ -1,0 +1,41 @@
+{
+  "brands": [
+    {
+      "slug": "andar",
+      "name": "Andar",
+      "colour": "#D8401F",
+      "timezone": "Asia/Manila",
+      "slots": ["12:00", "19:00"],
+      "approvers": ["nath"],
+      "postIdPattern": "^A[0-9]",
+      "rootEnv": "PINCH_ANDAR_ROOT",
+      "queue": {
+        "csv": "_Post Queue/post-queue.csv",
+        "postizState": "_Post Queue/postiz-state.json"
+      },
+      "channels": [
+        { "key": "andar-facebook", "platform": "facebook", "name": "Andar", "postizIntegrationId": "cmvrr6ug40012ny8jsos3rza4" },
+        { "key": "andar-instagram", "platform": "instagram", "name": "made.to.andar", "postizIntegrationId": "cmvrruy9s0016ny8jbg4d5xyc" }
+      ]
+    },
+    {
+      "slug": "nest",
+      "name": "Nest Workspaces",
+      "colour": "#E8913A",
+      "timezone": "Asia/Manila",
+      "slots": ["08:00", "12:00", "18:00"],
+      "approvers": ["nath"],
+      "postIdPattern": "^(?!A[0-9])[A-Z]",
+      "rootEnv": "PINCH_NEST_ROOT",
+      "queue": {
+        "csv": "Designs/_Post Queue/post-queue.csv",
+        "postizState": "Designs/_Post Queue/postiz-state.json"
+      },
+      "channels": [
+        { "key": "nest-facebook", "platform": "facebook", "name": "Nest Workspaces", "postizIntegrationId": "cmvq6kfww0001mi8f8d2exoxu" },
+        { "key": "nest-instagram", "platform": "instagram", "name": "Nest Workspaces", "postizIntegrationId": "cmvq6cq5i0001o48p7tqo8isy" },
+        { "key": "nest-threads", "platform": "threads", "name": "Nest Workspaces", "postizIntegrationId": null, "active": false, "notes": "Integration id not found in nest-postiz-config.json yet; add it before Nest moves over." }
+      ]
+    }
+  ]
+}
