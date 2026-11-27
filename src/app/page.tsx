@@ -6,6 +6,7 @@ import { requireApprover } from "@/lib/session";
 import { STATE_LABEL, loudFlags, shortDay } from "@/lib/labels";
 import { todayIn } from "@/lib/time";
 import Icon from "./ui/Icon";
+import Wordmark from "./ui/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +29,17 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
     .filter((p) => p.state !== "rejected")
     .sort((a, b) => a.localTime.localeCompare(b.localTime));
   const shown = all === "1" ? cards : cards.slice(0, SHOW);
-  const dateLabel = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "long", day: "numeric", month: "long" }).format(
+  const dateLabel = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short" }).format(
     new Date(),
   );
 
   return (
     <div className="page">
-      <header className="page-head">
+      <div className="brand">
+        <Wordmark />
         <p className="date">{dateLabel}</p>
+      </div>
+      <header className="page-head">
         <h1>{cards.length ? `${cards.length} to review` : "All clear"}</h1>
       </header>
 

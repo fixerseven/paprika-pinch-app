@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { authEnabled } from "@/lib/auth";
+import Wordmark from "../ui/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,9 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
   if (!authEnabled()) redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
   return (
     <form className="login" method="post" action="/api/login">
-      <h1>Pinch</h1>
+      <h1>
+        <Wordmark height={40} />
+      </h1>
       <p className="sub">Enter your passcode.</p>
       <input type="hidden" name="next" value={next} />
       <input

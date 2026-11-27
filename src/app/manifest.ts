@@ -5,10 +5,10 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Pinch",
     short_name: "Pinch",
     description: "One place to approve every post.",
-    start_url: "/calendar",
+    start_url: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#ffffff",
+    background_color: "#fffdf7",
+    theme_color: "#fffdf7",
     icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml" }],
   };
 }
