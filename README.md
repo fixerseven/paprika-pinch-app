@@ -55,7 +55,9 @@ Card flags: check this fact today, Reel has no sound, Facebook story is manual, 
 
 ## Review (phase 2)
 
-`/review` is a stack of cards, soonest slot first: new and revised posts from makers, posts changed in the old queue after a decision, and ready posts with no yes yet. Swipe right to approve, left to drop, up to send back with a note; "Later" moves a card to the back; Undo stays for 10 seconds. Keyboard: arrows, and `u` to undo. `/revisions` lists what was sent back, with the note.
+The home screen is an inbox: what's waiting for review, what goes out today, and one quiet line each for posts with makers and posts on hold. One button, "Review N posts", opens `/review`.
+
+`/review` shows one post at a time, soonest slot first: new and revised posts from makers, posts changed in the old queue after a decision, and ready posts with no yes yet. Approve is the only filled button; Send back sits beside it; Later and Drop are behind the ··· menu. Swipe right to approve, swipe left to send back with a note (so a slip never drops a post). Undo stays for 10 seconds. Keyboard: → approve, ← send back, `l` later, `u` undo. Channels, version and quieter notes sit behind "Details"; only flags that need a look (check a fact, no sound, missing file…) show on the screen. `/revisions` lists what's with makers, with the note.
 
 Sign in with `PINCH_PASSCODE`. The session cookie lasts 30 days; five wrong tries lock that client out for five minutes.
 
