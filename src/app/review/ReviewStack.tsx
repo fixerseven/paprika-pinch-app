@@ -3,11 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewCard } from "@/lib/review";
-import { PLATFORM_SHORT, loudFlags, shortDay } from "@/lib/labels";
+import { PLATFORM_SHORT, loudFlags } from "@/lib/labels";
+import { groupByPage, relDay } from "@/lib/pages";
 import Icon from "../ui/Icon";
+import PageTile from "../ui/PageTile";
 
 type Act = "approve" | "reject" | "revise";
 const LABEL: Record<Act, string> = { approve: "Approved", reject: "Dropped", revise: "Sent back" };
+const LOG: Record<Act, string> = { approve: "approved", reject: "dropped", revise: "sent back" };
+type Hand = { from: string | null; to: string } | null;
 const THRESHOLD = 90;
 const QUICK = ["Fix the caption", "Swap the photo", "Check the facts", "Wrong day"];
 const PART: Record<string, string> = { feed: "Feed", story: "Story", reel: "Reel" };
@@ -28,9 +32,24 @@ async function send(id: number, body: Record<string, unknown>) {
  * Later and Drop live behind the ··· menu. Swipe right approves, swipe left opens
  * Send back (so a slip never drops a post). Keys: → approve, ← send back, L later, U undo.
  */
-export default function ReviewStack({ initial, today }: { initial: ReviewCard[]; today: string }) {
+export default function ReviewStack({
+  initial,
+  today,
+  many = false,
+  rules = {},
+}: {
+  initial: ReviewCard[];
+  today: string;
+  many?: boolean;
+  rules?: Record<string, string[]>;
+}) {
   const [cards, setCards] = useState(initial);
   const [total] = useState(initial.length);
+  // Page by page only matters when the run spans more than one page.
+  const paged = many && new Set(initial.map((c) => c.brandSlug)).size > 1;
+  const [order, setOrder] = useState(() => initial.map((c) => ({ id: c.id, brandSlug: c.brandSlug })));
+  const [hand, setHand] = useState<Hand>(() => (paged && initial[0] ? { from: null, to: initial[0].brandSlug } : null));
+  const [log, setLog] = useState<Record<string, Partial<Record<Act, number>>>>({});
   const [slide, setSlide] = useState(0);
   const [details, setDetails] = useState(false);
   const [drag, setDrag] = useState({ x: 0, active: false });
@@ -70,7 +89,12 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
       try {
         await send(top.id, { action: act, versionId: top.versionId, comment: comment ?? null });
         setTimeout(() => {
-          next((cs) => cs.slice(1));
+          next((cs) => {
+            const rest = cs.slice(1);
+            if (paged && rest[0] && rest[0].brandSlug !== top.brandSlug) setHand({ from: top.brandSlug, to: rest[0].brandSlug });
+            return rest;
+          });
+          setLog((l) => ({ ...l, [top.brandSlug]: { ...l[top.brandSlug], [act]: (l[top.brandSlug]?.[act] ?? 0) + 1 } }));
           setLeaving(null);
           setNote("");
           setUndo({ card: top, act, until: Date.now() + 10_000 });
@@ -91,11 +115,26 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
     next((cs) => (cs.length > 1 ? [...cs.slice(1), cs[0]] : cs));
   }, [next]);
 
+  const skipPage = useCallback(
+    (slug: string) => {
+      setSheet(null);
+      setOrder((o) => [...o.filter((x) => x.brandSlug !== slug), ...o.filter((x) => x.brandSlug === slug)]);
+      next((cs) => {
+        const out = [...cs.filter((c) => c.brandSlug !== slug), ...cs.filter((c) => c.brandSlug === slug)];
+        setHand(out[0] && out[0].brandSlug !== slug ? { from: null, to: out[0].brandSlug } : null);
+        return out;
+      });
+    },
+    [next],
+  );
+
   const doUndo = useCallback(async () => {
     if (!undo) return;
     try {
       await send(undo.card.id, { action: "undo" });
       next((cs) => [undo.card, ...cs]);
+      setHand(null);
+      setLog((l) => ({ ...l, [undo.card.brandSlug]: { ...l[undo.card.brandSlug], [undo.act]: Math.max(0, (l[undo.card.brandSlug]?.[undo.act] ?? 1) - 1) } }));
       setUndo(null);
     } catch (e) {
       setUndo(null);
@@ -109,6 +148,10 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
         if (e.key === "Escape") setSheet(null);
         return;
       }
+      if (hand) {
+        if (e.key === "Enter" || e.key === "ArrowRight") setHand(null);
+        return;
+      }
       if (e.key === "ArrowRight") decide("approve");
       else if (e.key === "ArrowLeft") setSheet("send");
       else if (e.key === "l" || e.key === "ArrowDown") later();
@@ -116,7 +159,7 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decide, later, doUndo, sheet]);
+  }, [decide, later, doUndo, sheet, hand]);
 
   const onDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button, a, video")) return;
@@ -142,19 +185,93 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
       <Icon name="x" />
     </Link>
   );
+  const done = total - cards.length;
+  const left = new Set(cards.map((c) => c.id));
+  const undoBtn = undo && (
+    <button className="undo-inline" onClick={doUndo}>
+      {LABEL[undo.act]} {undo.card.externalId} · <b>Undo</b>
+    </button>
+  );
+  const progress = paged ? (
+    <Segments order={order} left={left} current={hand ? hand.to : top?.brandSlug} />
+  ) : (
+    <div className="prog" role="progressbar" aria-label={`${done} of ${total} done`} aria-valuenow={done} aria-valuemax={total}>
+      <i style={{ width: `${total ? Math.max(4, Math.round((100 * done) / total)) : 0}%` }} />
+    </div>
+  );
 
   if (!top) {
     return (
       <div className="focus">
-        <div className="fbar">{close}</div>
+        <div className="fbar">
+          {close}
+          {undoBtn}
+        </div>
         <div className="done">
-          <h1>All done</h1>
-          <p>Nothing left to review. Approved posts wait for their day.</p>
-          <Link href="/" className="sec" style={{ marginTop: 12 }}>
+          <svg className="check" viewBox="0 0 72 72" aria-hidden>
+            <circle cx="36" cy="36" r="34" />
+            <path d="M24 37l8 8 16-17" />
+          </svg>
+          <h1>{total ? "That's everything" : "Nothing to review"}</h1>
+          <p>Approved posts wait for their day in the calendar.</p>
+          <Link href="/" className="sec" style={{ marginTop: 16 }}>
             Back to inbox
           </Link>
         </div>
-        {undo && <Toast undo={undo} onUndo={doUndo} />}
+      </div>
+    );
+  }
+
+  if (hand) {
+    const to = cards.find((c) => c.brandSlug === hand.to)!;
+    const n = cards.filter((c) => c.brandSlug === hand.to).length;
+    const pagesLeft = new Set(cards.map((c) => c.brandSlug)).size;
+    const was = hand.from ? log[hand.from] ?? {} : null;
+    const wasText = was && (Object.keys(LOG) as Act[]).filter((a) => was[a]).map((a) => `${was[a]} ${LOG[a]}`).join(", ");
+    const fromName = hand.from ? initial.find((c) => c.brandSlug === hand.from)!.brandName : "";
+    const fromColour = hand.from ? initial.find((c) => c.brandSlug === hand.from)!.brandColour : "";
+    const pageRules = rules[hand.to] ?? [];
+    return (
+      <div className="focus">
+        <div className="fbar">
+          {close}
+          {undoBtn ?? progress}
+          <span style={{ width: 44 }} />
+        </div>
+        <div className="hand">
+          {hand.from && (
+            <p className="was">
+              <PageTile name={fromName} colour={fromColour} />
+              <span>
+                {fromName} done{wasText ? `: ${wasText}` : ""}
+              </span>
+            </p>
+          )}
+          <h1>
+            <PageTile name={to.brandName} colour={to.brandColour} large />
+            {to.brandName}
+          </h1>
+          <p className="sub num">
+            {n} {n === 1 ? "post" : "posts"} to review · {pagesLeft} {pagesLeft === 1 ? "page" : "pages"} left
+          </p>
+          {pageRules.length > 0 && (
+            <ul>
+              {pageRules.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="row2">
+            {pagesLeft > 1 && (
+              <button className="sec" onClick={() => skipPage(hand.to)}>
+                Skip page
+              </button>
+            )}
+            <button className="pri" onClick={() => setHand(null)}>
+              Start {to.brandName.split(" ")[0]}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -171,29 +288,42 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
     opacity: fly ? 0 : 1,
     transition: drag.active && !leaving ? "none" : undefined,
   };
-  const done = total - cards.length;
+  const when = `${relDay(top.localDate, today)}, ${top.localTime}${top.missed ? " · slot passed" : ""}`;
+  const samePage = order.filter((o) => o.brandSlug === top.brandSlug);
+  const pos = samePage.findIndex((o) => o.id === top.id) + 1;
 
   return (
     <div className="focus">
       <div className="fbar">
         {close}
-        <span className="cnt num">
-          {Math.min(done + 1, total)} of {total}
-        </span>
+        {undoBtn ?? progress}
         <button className="ib" onClick={() => setSheet("more")} aria-label="More actions">
           <Icon name="more" />
         </button>
       </div>
-      <div className="prog" aria-hidden>
-        <i style={{ width: `${total ? Math.round((100 * done) / total) : 0}%` }} />
-      </div>
 
-      <p className="meta num" style={{ "--brand": top.brandColour } as React.CSSProperties}>
-        <span className="bd" aria-hidden />
-        <b>{top.brandName}</b>
-        {top.localDate === today ? "Today" : shortDay(top.localDate)}, {top.localTime}
-        {top.missed && " · slot passed"}
-      </p>
+      {many ? (
+        <div className="meta2">
+          <PageTile name={top.brandName} colour={top.brandColour} large />
+          <div>
+            <b>{top.brandName}</b>
+            <span className="num">
+              {when} · {channels.join(", ") || "No channels"}
+            </span>
+          </div>
+          {samePage.length > 1 && (
+            <em className="num">
+              {pos} of {samePage.length}
+            </em>
+          )}
+        </div>
+      ) : (
+        <p className="meta num" style={{ "--brand": top.brandColour } as React.CSSProperties}>
+          <span className="bd" aria-hidden />
+          <b>{top.brandName}</b>
+          {when}
+        </p>
+      )}
 
       <div
         className="post"
@@ -246,9 +376,32 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
         </p>
       ))}
 
-      <p className={`cap${details ? " open" : ""}`}>{top.caption?.trim() || "No caption"}</p>
-      {details && (
-        <dl className="det num">
+      <p
+        className={`cap${details ? " open" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={details}
+        onClick={() => setDetails((d) => !d)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setDetails((d) => !d))}
+      >
+        {top.caption?.trim() || "No caption"}
+      </p>
+
+      <div className="acts">
+        <button className="sec" onClick={() => setSheet("send")} disabled={busy}>
+          Send back
+        </button>
+        <button className="pri" onClick={() => decide("approve")} disabled={busy}>
+          Approve
+        </button>
+      </div>
+
+      {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
+      {sheet === "more" && (
+        <div className="sheet" role="dialog" aria-modal="true" aria-label="More actions">
+          <div className="grab" />
+          <h3>{top.title}</h3>
+          <dl className="det num">
           <dt>Posts to</dt>
           <dd>{channels.join(", ") || "No channels"}</dd>
           <dt>Post</dt>
@@ -274,34 +427,21 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
               <dd>{f.text}</dd>
             </span>
           ))}
-          <dt />
-          <dd>
-            <Link href={`/posts/${top.id}`}>Open full post</Link>
-          </dd>
-        </dl>
-      )}
-      <button className="lnk" onClick={() => setDetails((d) => !d)}>
-        {details ? "Less" : "Details"}
-      </button>
-
-      <div className="acts">
-        <button className="sec" onClick={() => setSheet("send")} disabled={busy}>
-          Send back
-        </button>
-        <button className="pri" onClick={() => decide("approve")} disabled={busy}>
-          Approve
-        </button>
-      </div>
-
-      {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
-      {sheet === "more" && (
-        <div className="sheet" role="dialog" aria-modal="true" aria-label="More actions">
-          <div className="grab" />
-          <h3>More</h3>
+            <dt />
+            <dd>
+              <Link href={`/posts/${top.id}`}>Open full post</Link>
+            </dd>
+          </dl>
           <button className="opt" onClick={later} disabled={cards.length < 2}>
             <b>Later</b>
             <span>Move to the back of the pile</span>
           </button>
+          {paged && new Set(cards.map((c) => c.brandSlug)).size > 1 && (
+            <button className="opt" onClick={() => skipPage(top.brandSlug)}>
+              <b>Skip {top.brandName} for now</b>
+              <span>Move this page&apos;s posts to the end</span>
+            </button>
+          )}
           <button className="opt" onClick={() => decide("reject")}>
             <b>Drop</b>
             <span>Remove this post. The slot shows as open.</span>
@@ -341,18 +481,24 @@ export default function ReviewStack({ initial, today }: { initial: ReviewCard[];
           </button>
         </form>
       )}
-      {undo && <Toast undo={undo} onUndo={doUndo} />}
     </div>
   );
 }
 
-function Toast({ undo, onUndo }: { undo: { card: ReviewCard; act: Act }; onUndo: () => void }) {
+/** One progress segment per page, sized by its post count; the current page is tinted. */
+function Segments({ order, left, current }: { order: { id: number; brandSlug: string }[]; left: Set<number>; current?: string }) {
+  const groups = groupByPage(order);
+  const done = order.filter((o) => !left.has(o.id)).length;
   return (
-    <div className="toast" role="status">
-      <span>
-        {LABEL[undo.act]} {undo.card.externalId}
-      </span>
-      <button onClick={onUndo}>Undo</button>
+    <div className="segs" role="progressbar" aria-label={`${done} of ${order.length} done, ${groups.length} pages`} aria-valuenow={done} aria-valuemax={order.length}>
+      {groups.map((g) => {
+        const d = g.items.filter((o) => !left.has(o.id)).length;
+        return (
+          <i key={g.slug} className={g.slug === current ? "cur" : undefined} style={{ flex: g.items.length }}>
+            <b style={{ width: `${Math.round((100 * d) / g.items.length)}%` }} />
+          </i>
+        );
+      })}
     </div>
   );
 }

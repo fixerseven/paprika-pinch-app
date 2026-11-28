@@ -22,10 +22,17 @@ export interface BrandConfig {
   rootEnv: string;
   queue: { csv: string; postizState: string };
   channels: ChannelConfig[];
+  /** Short reminders shown before reviewing this page's posts. */
+  rules?: string[];
 }
 
 export function loadBrandConfig(file = path.join(process.cwd(), "config", "brands.json")): BrandConfig[] {
   return (JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ file, "utf8")) as { brands: BrandConfig[] }).brands;
+}
+
+/** Each page's review reminders, by slug. */
+export function pageRules(brands: BrandConfig[] = loadBrandConfig()): Record<string, string[]> {
+  return Object.fromEntries(brands.map((b) => [b.slug, b.rules ?? []]));
 }
 
 /** The brand's folder on this machine, or undefined if its env var isn't set. */
