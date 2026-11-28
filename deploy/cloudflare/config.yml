@@ -1,0 +1,11 @@
+# Cloudflare Tunnel for Pinch on the Mac mini.
+# Publishes the local app (127.0.0.1:3100) at https://pinch.hellopaprika.com
+# without opening any port on the Mac mini. Copy to ~/.cloudflared/config.yml
+# and replace <TUNNEL_ID> with the id from `cloudflared tunnel create pinch`.
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/production/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: pinch.hellopaprika.com
+    service: http://127.0.0.1:3100
+  - service: http_status:404

@@ -44,7 +44,7 @@ export function decide(
   db: DB,
   postId: number,
   action: ReviewAction,
-  opts: { actor: string; versionId?: number | null; comment?: string | null; now?: Date },
+  opts: { actor: string; versionId?: number | null; comment?: string | null; via?: string | null; now?: Date },
 ): DecideResult {
   const now = (opts.now ?? new Date()).toISOString();
   const comment = opts.comment?.trim() || null;
@@ -76,10 +76,10 @@ export function decide(
       );
       const { id } = db
         .prepare(
-          `INSERT INTO decisions (post_id, version_id, action, comment, actor, created_at, prev_state, prev_reason)
-           VALUES (?, ?, 'undo', ?, ?, ?, ?, ?) RETURNING id`,
+          `INSERT INTO decisions (post_id, version_id, action, comment, actor, created_at, prev_state, prev_reason, via)
+           VALUES (?, ?, 'undo', ?, ?, ?, ?, ?, ?) RETURNING id`,
         )
-        .get(postId, last.version_id, `Undid ${last.action}`, opts.actor, now, post.state, post.state_reason) as {
+        .get(postId, last.version_id, `Undid ${last.action}`, opts.actor, now, post.state, post.state_reason, opts.via ?? null) as {
         id: number;
       };
       return { postId, state: last.prev_state, decisionId: id };
@@ -102,10 +102,10 @@ export function decide(
     db.prepare("UPDATE posts SET state = ?, state_reason = ?, updated_at = ? WHERE id = ?").run(to, reason, now, postId);
     const { id } = db
       .prepare(
-        `INSERT INTO decisions (post_id, version_id, action, comment, actor, created_at, prev_state, prev_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO decisions (post_id, version_id, action, comment, actor, created_at, prev_state, prev_reason, via)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
-      .get(postId, post.current_version_id, action, comment, opts.actor, now, post.state, post.state_reason) as {
+      .get(postId, post.current_version_id, action, comment, opts.actor, now, post.state, post.state_reason, opts.via ?? null) as {
       id: number;
     };
     return { postId, state: to, decisionId: id };

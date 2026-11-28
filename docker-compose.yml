@@ -11,6 +11,7 @@ services:
       PINCH_SECRET: "${PINCH_SECRET:?set PINCH_SECRET}"
       PINCH_APPROVER_NAME: "${PINCH_APPROVER_NAME:-nath}"
       PINCH_MAKER_TOKEN: "${PINCH_MAKER_TOKEN:-}"
+      PINCH_PUBLIC_URL: "${PINCH_PUBLIC_URL:-}"
     volumes:
       - pinch-data:/data
       # The brand folders are mounted read-only, so Pinch can't change the old queues.

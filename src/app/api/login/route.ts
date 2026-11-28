@@ -4,6 +4,19 @@ import { COOKIE, approverName, authEnabled, checkPasscode, makeSession } from "@
 export const dynamic = "force-dynamic";
 
 const attempts = new Map<string, { n: number; until: number }>();
+// Pinch is reachable from the internet once the Claude connector is on, so also cap wrong
+// tries from everywhere together: 20 in an hour pauses sign-in for 15 minutes.
+let wrongTimes: number[] = [];
+let pausedUntil = 0;
+
+/**
+ * Redirect with a relative Location. Behind `tailscale serve`, req.url is
+ * http://localhost:3100/..., so an absolute redirect built from it would
+ * send the phone to localhost.
+ */
+function go(location: string) {
+  return new NextResponse(null, { status: 303, headers: { Location: location } });
+}
 
 function safeNext(v: FormDataEntryValue | null): string {
   const s = typeof v === "string" ? v : "";
@@ -13,29 +26,33 @@ function safeNext(v: FormDataEntryValue | null): string {
 export async function POST(req: Request) {
   const form = await req.formData();
   const next = safeNext(form.get("next"));
-  const url = new URL(req.url);
-  const back = (err: string) =>
-    NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(next)}&error=${err}`, url), 303);
+  const back = (err: string) => go(`/login?next=${encodeURIComponent(next)}&error=${err}`);
 
-  if (!authEnabled()) return NextResponse.redirect(new URL(next, url), 303);
+  if (!authEnabled()) return go(next);
 
   // Slow down guessing: five wrong tries locks this client out for five minutes.
-  const who = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
+  const who = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
   const a = attempts.get(who);
-  if (a && a.until > Date.now()) return back("locked");
+  if ((a && a.until > Date.now()) || pausedUntil > Date.now()) return back("locked");
 
   if (!checkPasscode(String(form.get("passcode") ?? ""))) {
+    wrongTimes = [...wrongTimes.filter((t) => t > Date.now() - 3600_000), Date.now()];
+    if (wrongTimes.length >= 20) {
+      pausedUntil = Date.now() + 15 * 60_000;
+      wrongTimes = [];
+    }
     const n = (a && a.until <= Date.now() && a.n >= 5 ? 0 : a?.n ?? 0) + 1;
     attempts.set(who, { n, until: n >= 5 ? Date.now() + 5 * 60_000 : 0 });
     return back("wrong");
   }
   attempts.delete(who);
   const s = makeSession(approverName());
-  const res = NextResponse.redirect(new URL(next, url), 303);
+  const res = go(next);
   res.cookies.set(COOKIE, s.value, {
     httpOnly: true,
     sameSite: "lax",
-    secure: url.protocol === "https:",
+    // Behind `tailscale serve` the app sees plain http on localhost; trust the proxy's header.
+    secure: (req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "")) === "https",
     path: "/",
     maxAge: s.maxAge,
   });
