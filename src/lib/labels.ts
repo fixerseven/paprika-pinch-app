@@ -50,3 +50,29 @@ export function formatWhen(iso: string, timeZone = "Asia/Manila"): string {
     hour12: false,
   });
 }
+
+/**
+ * Flags worth a line on the review screen. Everything else (Facebook story is manual,
+ * off-slot time, old-flow notes) stays in Details, so the screen only speaks up when
+ * something needs a look ("due") or is broken ("bad").
+ */
+export const FLAG_TONE: Record<string, "due" | "bad"> = {
+  check_fact: "due",
+  silent_reel: "due",
+  caption_unfinished: "due",
+  conflict: "due",
+  partly_scheduled: "due",
+  caption_missing: "bad",
+  missing_media: "bad",
+  bad_media_path: "bad",
+};
+
+export function loudFlags<T extends { code: string }>(flags: T[]): (T & { tone: "due" | "bad" })[] {
+  return flags.filter((f) => FLAG_TONE[f.code]).map((f) => ({ ...f, tone: FLAG_TONE[f.code] }));
+}
+
+/** "Fri 27 Nov" */
+export function shortDay(date: string): string {
+  const d = formatDay(date);
+  return `${d.weekday} ${d.day} ${d.month}`;
+}

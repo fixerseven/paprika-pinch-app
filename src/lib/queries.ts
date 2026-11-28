@@ -189,3 +189,31 @@ export function getPost(db: DB, id: number) {
     .all(id) as any[];
   return { post: { ...post, flags: JSON.parse(post.flags) as Flag[] }, version, media, versions, channels, decisions, jobs };
 }
+
+export interface ChannelIssue {
+  brandSlug: string;
+  brandName: string;
+  platform: string;
+  reason: "off" | "expired";
+  posts: number;
+}
+
+/**
+ * Channels that can't post right now and have posts coming up:
+ * switched off in config while upcoming posts name them, or with an expired login.
+ */
+export function channelIssues(db: DB, now = new Date()): ChannelIssue[] {
+  return db
+    .prepare(
+      `SELECT b.slug AS brandSlug, b.name AS brandName, c.platform,
+              CASE WHEN c.active = 0 THEN 'off' ELSE 'expired' END AS reason,
+              COUNT(DISTINCT p.id) AS posts
+       FROM channels c JOIN brands b ON b.id = c.brand_id
+       JOIN post_channels pc ON pc.channel_id = c.id
+       JOIN posts p ON p.id = pc.post_id
+       WHERE (c.active = 0 OR (c.token_expires_at IS NOT NULL AND c.token_expires_at < @now))
+         AND p.scheduled_at >= @now AND p.state NOT IN ('rejected', 'published', 'failed')
+       GROUP BY c.id ORDER BY b.id, c.platform`,
+    )
+    .all({ now: now.toISOString() }) as ChannelIssue[];
+}

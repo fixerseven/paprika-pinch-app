@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { authEnabled } from "@/lib/auth";
+import Wordmark from "../ui/Wordmark";
 
 export const dynamic = "force-dynamic";
 
@@ -9,12 +10,14 @@ const ERRORS: Record<string, string> = {
 };
 
 export default async function Login({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
-  const { next = "/review", error } = await searchParams;
-  if (!authEnabled()) redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/review");
+  const { next = "/", error } = await searchParams;
+  if (!authEnabled()) redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
   return (
     <form className="login" method="post" action="/api/login">
-      <h1>Sign in</h1>
-      <p className="sub">Enter your Pinch passcode.</p>
+      <h1>
+        <Wordmark height={40} />
+      </h1>
+      <p className="sub">Enter your passcode.</p>
       <input type="hidden" name="next" value={next} />
       <input
         name="passcode"
@@ -25,8 +28,10 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
         required
         aria-label="Passcode"
       />
-      {error && ERRORS[error] && <p className="login-error">{ERRORS[error]}</p>}
-      <button type="submit">Sign in</button>
+      {error && ERRORS[error] && <p className="err">{ERRORS[error]}</p>}
+      <button type="submit" className="pri">
+        Sign in
+      </button>
     </form>
   );
 }

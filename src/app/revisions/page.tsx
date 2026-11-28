@@ -1,47 +1,53 @@
 import Link from "next/link";
 import { getDb } from "@/lib/db";
+import { listBrands } from "@/lib/queries";
 import { listRevisions } from "@/lib/review";
 import { requireApprover } from "@/lib/session";
-import { formatDay, formatWhen } from "@/lib/labels";
+import { formatWhen, shortDay } from "@/lib/labels";
+import Icon from "../ui/Icon";
 
 export const dynamic = "force-dynamic";
 
 export default async function RevisionsPage() {
   await requireApprover("/revisions");
-  const rows = listRevisions(getDb());
+  const db = getDb();
+  const colour = new Map(listBrands(db).map((b) => [b.slug, b.colour]));
+  const rows = listRevisions(db);
   return (
-    <div className="revisions">
-      <h1>Sent back</h1>
-      <p className="sub">Posts waiting on a maker. They come back to Review when a new version arrives.</p>
+    <div className="page">
+      <Link href="/" className="back" style={{ marginLeft: 16 }}>
+        <Icon name="back" />
+        Inbox
+      </Link>
+      <header className="page-head">
+        <h1>With makers</h1>
+        <p className="sub">They come back to review when a new version arrives.</p>
+      </header>
       {rows.length === 0 ? (
-        <p className="stack-empty">Nothing sent back.</p>
+        <p className="none" style={{ marginTop: 20 }}>
+          Nothing sent back.
+        </p>
       ) : (
-        <ul className="rev-list">
-          {rows.map((r) => {
-            const d = formatDay(r.localDate);
-            return (
-              <li key={r.id}>
-                <Link href={`/posts/${r.id}`}>
-                  <span className="post-id">{r.externalId}</span> {r.title}
-                </Link>
-                <p className="sub">
-                  {r.brandName} · {d.weekday} {d.day} {d.month}, {r.localTime}
-                  {r.owner && <> · {r.owner}</>}
-                  {r.versionNumber && <> · v{r.versionNumber}</>}
-                </p>
-                {r.comment && (
-                  <blockquote>
-                    {r.comment}
-                    {r.at && (
-                      <cite>
-                        {r.by}, {formatWhen(r.at)}
-                      </cite>
-                    )}
-                  </blockquote>
-                )}
-              </li>
-            );
-          })}
+        <ul className="rows" style={{ marginTop: 16 }}>
+          {rows.map((r) => (
+            <li key={r.id}>
+              <Link href={`/posts/${r.id}`} className="row" style={{ "--brand": colour.get(r.brandSlug) } as React.CSSProperties}>
+                <span className="mid">
+                  <span className="t">{r.title}</span>
+                  <span className="s num">
+                    <span className="bd" aria-hidden />
+                    {r.brandName} · {shortDay(r.localDate)}, {r.localTime}
+                    {r.owner && <> · {r.owner}</>}
+                  </span>
+                  {r.comment && (
+                    <span className="note" style={{ display: "block" }}>
+                      “{r.comment}”{r.at && <span className="muted"> {formatWhen(r.at)}</span>}
+                    </span>
+                  )}
+                </span>
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
     </div>

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
 import "./globals.css";
 import Nav from "./Nav";
 
@@ -15,8 +14,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f5f0" },
-    { media: "(prefers-color-scheme: dark)", color: "#141517" },
+    { media: "(prefers-color-scheme: light)", color: "#fffdf7" },
+    { media: "(prefers-color-scheme: dark)", color: "#17150f" },
   ],
 };
 
@@ -24,13 +23,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <header className="topbar">
-          <Link href="/calendar" className="wordmark">
-            Pinch
-          </Link>
-          <Nav />
-        </header>
-        <main>{children}</main>
+        {children}
+        <Nav />
       </body>
     </html>
   );

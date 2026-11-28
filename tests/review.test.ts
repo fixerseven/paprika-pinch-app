@@ -157,3 +157,16 @@ describe("review stack", () => {
     expect(getReviewStack(db, { brand: "andar", now: NOW }).every((c) => c.brandSlug === "andar")).toBe(true);
   });
 });
+
+describe("channelIssues", () => {
+  it("lists a channel with an expired login that upcoming posts use, once", async () => {
+    const { channelIssues } = await import("@/lib/queries");
+    newPost();
+    newPost({ externalId: "A41" });
+    expect(channelIssues(db, NOW)).toEqual([]);
+    db.prepare("UPDATE channels SET token_expires_at = ? WHERE key = 'andar-instagram'").run("2026-11-15T00:00:00Z");
+    expect(channelIssues(db, NOW)).toEqual([
+      { brandSlug: "andar", brandName: "Andar", platform: "instagram", reason: "expired", posts: 2 },
+    ]);
+  });
+});

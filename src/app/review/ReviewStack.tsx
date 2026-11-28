@@ -1,18 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewCard } from "@/lib/review";
+import { PLATFORM_SHORT, loudFlags } from "@/lib/labels";
+import { groupByPage, relDay } from "@/lib/pages";
+import Icon from "../ui/Icon";
+import PageTile from "../ui/PageTile";
 
 type Act = "approve" | "reject" | "revise";
 const LABEL: Record<Act, string> = { approve: "Approved", reject: "Dropped", revise: "Sent back" };
-const PLATFORM: Record<string, string> = { facebook: "FB", instagram: "IG", threads: "Threads" };
-const THRESHOLD = 110;
-
-function when(c: ReviewCard) {
-  const d = new Date(`${c.localDate}T00:00:00Z`);
-  const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
-  return `${day}, ${c.localTime}`;
-}
+const LOG: Record<Act, string> = { approve: "approved", reject: "dropped", revise: "sent back" };
+type Hand = { from: string | null; to: string } | null;
+const THRESHOLD = 90;
+const QUICK = ["Fix the caption", "Swap the photo", "Check the facts", "Wrong day"];
+const PART: Record<string, string> = { feed: "Feed", story: "Story", reel: "Reel" };
 
 async function send(id: number, body: Record<string, unknown>) {
   const res = await fetch(`/api/posts/${id}/decision`, {
@@ -25,247 +27,478 @@ async function send(id: number, body: Record<string, unknown>) {
   return data;
 }
 
-export default function ReviewStack({ initial }: { initial: ReviewCard[] }) {
+/**
+ * One post per screen. Approve is the only filled button; Send back sits beside it;
+ * Later and Drop live behind the ··· menu. Swipe right approves, swipe left opens
+ * Send back (so a slip never drops a post). Keys: → approve, ← send back, L later, U undo.
+ */
+export default function ReviewStack({
+  initial,
+  today,
+  many = false,
+  rules = {},
+}: {
+  initial: ReviewCard[];
+  today: string;
+  many?: boolean;
+  rules?: Record<string, string[]>;
+}) {
   const [cards, setCards] = useState(initial);
-  const [done, setDone] = useState(0);
-  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
+  const [total] = useState(initial.length);
+  // Page by page only matters when the run spans more than one page.
+  const paged = many && new Set(initial.map((c) => c.brandSlug)).size > 1;
+  const [order, setOrder] = useState(() => initial.map((c) => ({ id: c.id, brandSlug: c.brandSlug })));
+  const [hand, setHand] = useState<Hand>(() => (paged && initial[0] ? { from: null, to: initial[0].brandSlug } : null));
+  const [log, setLog] = useState<Record<string, Partial<Record<Act, number>>>>({});
+  const [slide, setSlide] = useState(0);
+  const [details, setDetails] = useState(false);
+  const [drag, setDrag] = useState({ x: 0, active: false });
   const [leaving, setLeaving] = useState<Act | null>(null);
-  const [comment, setComment] = useState<string | null>(null); // open revise sheet when not null
+  const [entering, setEntering] = useState(false);
+  const [sheet, setSheet] = useState<"more" | "send" | null>(null);
+  const [note, setNote] = useState("");
   const [undo, setUndo] = useState<{ card: ReviewCard; act: Act; until: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const start = useRef<{ x: number; y: number } | null>(null);
-  const [, tick] = useState(0);
+  const start = useRef<number | null>(null);
 
   const top = cards[0];
 
   useEffect(() => {
     if (!undo) return;
-    const t = setInterval(() => {
-      if (Date.now() > undo.until) setUndo(null);
-      tick((n) => n + 1);
-    }, 500);
-    return () => clearInterval(t);
+    const t = setTimeout(() => setUndo(null), Math.max(0, undo.until - Date.now()));
+    return () => clearTimeout(t);
   }, [undo]);
 
+  const next = useCallback((update: (cs: ReviewCard[]) => ReviewCard[]) => {
+    setCards(update);
+    setSlide(0);
+    setDetails(false);
+    setDrag({ x: 0, active: false });
+    setEntering(true);
+    setTimeout(() => setEntering(false), 300);
+  }, []);
+
   const decide = useCallback(
-    async (act: Act, note?: string) => {
+    async (act: Act, comment?: string) => {
       if (!top || busy) return;
       setBusy(true);
       setError(null);
+      setSheet(null);
       setLeaving(act);
       try {
-        await send(top.id, { action: act, versionId: top.versionId, comment: note ?? null });
+        await send(top.id, { action: act, versionId: top.versionId, comment: comment ?? null });
         setTimeout(() => {
-          setCards((cs) => cs.slice(1));
-          setDone((n) => n + 1);
+          next((cs) => {
+            const rest = cs.slice(1);
+            if (paged && rest[0] && rest[0].brandSlug !== top.brandSlug) setHand({ from: top.brandSlug, to: rest[0].brandSlug });
+            return rest;
+          });
+          setLog((l) => ({ ...l, [top.brandSlug]: { ...l[top.brandSlug], [act]: (l[top.brandSlug]?.[act] ?? 0) + 1 } }));
           setLeaving(null);
-          setDrag({ x: 0, y: 0, active: false });
+          setNote("");
           setUndo({ card: top, act, until: Date.now() + 10_000 });
-        }, 180);
+        }, 220);
       } catch (e) {
         setLeaving(null);
-        setDrag({ x: 0, y: 0, active: false });
+        setDrag({ x: 0, active: false });
         setError((e as Error).message);
       } finally {
-        setTimeout(() => setBusy(false), 200);
+        setTimeout(() => setBusy(false), 240);
       }
     },
-    [top, busy],
+    [top, busy, next],
   );
 
   const later = useCallback(() => {
-    setCards((cs) => (cs.length > 1 ? [...cs.slice(1), cs[0]] : cs));
-    setDrag({ x: 0, y: 0, active: false });
-  }, []);
+    setSheet(null);
+    next((cs) => (cs.length > 1 ? [...cs.slice(1), cs[0]] : cs));
+  }, [next]);
+
+  const skipPage = useCallback(
+    (slug: string) => {
+      setSheet(null);
+      setOrder((o) => [...o.filter((x) => x.brandSlug !== slug), ...o.filter((x) => x.brandSlug === slug)]);
+      next((cs) => {
+        const out = [...cs.filter((c) => c.brandSlug !== slug), ...cs.filter((c) => c.brandSlug === slug)];
+        setHand(out[0] && out[0].brandSlug !== slug ? { from: null, to: out[0].brandSlug } : null);
+        return out;
+      });
+    },
+    [next],
+  );
 
   const doUndo = useCallback(async () => {
     if (!undo) return;
     try {
       await send(undo.card.id, { action: "undo" });
-      setCards((cs) => [undo.card, ...cs]);
-      setDone((n) => Math.max(0, n - 1));
+      next((cs) => [undo.card, ...cs]);
+      setHand(null);
+      setLog((l) => ({ ...l, [undo.card.brandSlug]: { ...l[undo.card.brandSlug], [undo.act]: Math.max(0, (l[undo.card.brandSlug]?.[undo.act] ?? 1) - 1) } }));
       setUndo(null);
     } catch (e) {
       setUndo(null);
       setError((e as Error).message);
     }
-  }, [undo]);
+  }, [undo, next]);
 
-  // Keyboard: → approve, ← drop, ↑ send back, ↓ later, u undo.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (comment !== null || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      if (sheet || (e.target as HTMLElement)?.tagName === "TEXTAREA") {
+        if (e.key === "Escape") setSheet(null);
+        return;
+      }
+      if (hand) {
+        if (e.key === "Enter" || e.key === "ArrowRight") setHand(null);
+        return;
+      }
       if (e.key === "ArrowRight") decide("approve");
-      else if (e.key === "ArrowLeft") decide("reject");
-      else if (e.key === "ArrowUp") setComment("");
-      else if (e.key === "ArrowDown") later();
+      else if (e.key === "ArrowLeft") setSheet("send");
+      else if (e.key === "l" || e.key === "ArrowDown") later();
       else if (e.key === "u") doUndo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decide, later, doUndo, comment]);
+  }, [decide, later, doUndo, sheet, hand]);
 
   const onDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest("button, a, video, .media-scroll")) return;
-    start.current = { x: e.clientX, y: e.clientY };
+    if ((e.target as HTMLElement).closest("button, a, video")) return;
+    start.current = e.clientX;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setDrag({ x: 0, y: 0, active: true });
+    setDrag({ x: 0, active: true });
   };
   const onMove = (e: React.PointerEvent) => {
-    if (!start.current) return;
-    setDrag({ x: e.clientX - start.current.x, y: e.clientY - start.current.y, active: true });
+    if (start.current === null) return;
+    setDrag({ x: e.clientX - start.current, active: true });
   };
   const onUp = () => {
-    if (!start.current) return;
+    if (start.current === null) return;
     start.current = null;
-    const { x, y } = drag;
+    const x = drag.x;
+    setDrag({ x: 0, active: false });
     if (x > THRESHOLD) decide("approve");
-    else if (x < -THRESHOLD) decide("reject");
-    else if (y < -THRESHOLD && Math.abs(x) < THRESHOLD) {
-      setDrag({ x: 0, y: 0, active: false });
-      setComment("");
-    } else setDrag({ x: 0, y: 0, active: false });
+    else if (x < -THRESHOLD) setSheet("send");
   };
 
-  const hint: Act | null = leaving ?? (drag.x > 40 ? "approve" : drag.x < -40 ? "reject" : drag.y < -40 ? "revise" : null);
-  const fly =
-    leaving === "approve" ? "translateX(130%) rotate(12deg)" : leaving === "reject" ? "translateX(-130%) rotate(-12deg)" : leaving === "revise" ? "translateY(-120%)" : null;
-  const style: React.CSSProperties = {
-    transform: fly ?? `translate(${drag.x}px, ${Math.min(drag.y, 0)}px) rotate(${drag.x / 25}deg)`,
-    transition: drag.active && !leaving ? "none" : "transform 180ms ease-out",
+  const close = (
+    <Link href="/" className="ib" aria-label="Close">
+      <Icon name="x" />
+    </Link>
+  );
+  const done = total - cards.length;
+  const left = new Set(cards.map((c) => c.id));
+  const undoBtn = undo && (
+    <button className="undo-inline" onClick={doUndo}>
+      {LABEL[undo.act]} {undo.card.externalId} · <b>Undo</b>
+    </button>
+  );
+  const progress = paged ? (
+    <Segments order={order} left={left} current={hand ? hand.to : top?.brandSlug} />
+  ) : (
+    <div className="prog" role="progressbar" aria-label={`${done} of ${total} done`} aria-valuenow={done} aria-valuemax={total}>
+      <i style={{ width: `${total ? Math.max(4, Math.round((100 * done) / total)) : 0}%` }} />
+    </div>
+  );
+
+  if (!top) {
+    return (
+      <div className="focus">
+        <div className="fbar">
+          {close}
+          {undoBtn}
+        </div>
+        <div className="done">
+          <svg className="check" viewBox="0 0 72 72" aria-hidden>
+            <circle cx="36" cy="36" r="34" />
+            <path d="M24 37l8 8 16-17" />
+          </svg>
+          <h1>{total ? "That's everything" : "Nothing to review"}</h1>
+          <p>Approved posts wait for their day in the calendar.</p>
+          <Link href="/" className="sec" style={{ marginTop: 16 }}>
+            Back to inbox
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (hand) {
+    const to = cards.find((c) => c.brandSlug === hand.to)!;
+    const n = cards.filter((c) => c.brandSlug === hand.to).length;
+    const pagesLeft = new Set(cards.map((c) => c.brandSlug)).size;
+    const was = hand.from ? log[hand.from] ?? {} : null;
+    const wasText = was && (Object.keys(LOG) as Act[]).filter((a) => was[a]).map((a) => `${was[a]} ${LOG[a]}`).join(", ");
+    const fromName = hand.from ? initial.find((c) => c.brandSlug === hand.from)!.brandName : "";
+    const fromColour = hand.from ? initial.find((c) => c.brandSlug === hand.from)!.brandColour : "";
+    const pageRules = rules[hand.to] ?? [];
+    return (
+      <div className="focus">
+        <div className="fbar">
+          {close}
+          {undoBtn ?? progress}
+          <span style={{ width: 44 }} />
+        </div>
+        <div className="hand">
+          {hand.from && (
+            <p className="was">
+              <PageTile name={fromName} colour={fromColour} />
+              <span>
+                {fromName} done{wasText ? `: ${wasText}` : ""}
+              </span>
+            </p>
+          )}
+          <h1>
+            <PageTile name={to.brandName} colour={to.brandColour} large />
+            {to.brandName}
+          </h1>
+          <p className="sub num">
+            {n} {n === 1 ? "post" : "posts"} to review · {pagesLeft} {pagesLeft === 1 ? "page" : "pages"} left
+          </p>
+          {pageRules.length > 0 && (
+            <ul>
+              {pageRules.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="row2">
+            {pagesLeft > 1 && (
+              <button className="sec" onClick={() => skipPage(hand.to)}>
+                Skip page
+              </button>
+            )}
+            <button className="pri" onClick={() => setHand(null)}>
+              Start {to.brandName.split(" ")[0]}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const media = top.media;
+  const m = media[Math.min(slide, Math.max(0, media.length - 1))];
+  const parts = new Set(media.map((x) => x.part));
+  const loud = loudFlags(top.flags);
+  const quiet = top.flags.filter((f) => !loud.some((l) => l.code === f.code));
+  const channels = [...new Set(top.channels.map((c) => PLATFORM_SHORT[c.platform] ?? c.platform))];
+  const fly = leaving === "approve" ? "translateX(120%)" : leaving ? "translateX(-120%)" : null;
+  const cardStyle: React.CSSProperties = {
+    transform: fly ?? (drag.x ? `translateX(${drag.x}px) rotate(${drag.x / 40}deg)` : undefined),
+    opacity: fly ? 0 : 1,
+    transition: drag.active && !leaving ? "none" : undefined,
   };
+  const when = `${relDay(top.localDate, today)}, ${top.localTime}${top.missed ? " · slot passed" : ""}`;
+  const samePage = order.filter((o) => o.brandSlug === top.brandSlug);
+  const pos = samePage.findIndex((o) => o.id === top.id) + 1;
 
   return (
-    <div className="stack-wrap">
-      <p className="stack-count" aria-live="polite">
-        {cards.length ? `${cards.length} to go` : "All clear"}
-        {done > 0 && ` · ${done} done`}
-      </p>
+    <div className="focus">
+      <div className="fbar">
+        {close}
+        {undoBtn ?? progress}
+        <button className="ib" onClick={() => setSheet("more")} aria-label="More actions">
+          <Icon name="more" />
+        </button>
+      </div>
 
-      {error && (
-        <p className="stack-error" role="alert">
-          {error} <button onClick={() => location.reload()}>Reload</button>
+      {many ? (
+        <div className="meta2">
+          <PageTile name={top.brandName} colour={top.brandColour} large />
+          <div>
+            <b>{top.brandName}</b>
+            <span className="num">
+              {when} · {channels.join(", ") || "No channels"}
+            </span>
+          </div>
+          {samePage.length > 1 && (
+            <em className="num">
+              {pos} of {samePage.length}
+            </em>
+          )}
+        </div>
+      ) : (
+        <p className="meta num" style={{ "--brand": top.brandColour } as React.CSSProperties}>
+          <span className="bd" aria-hidden />
+          <b>{top.brandName}</b>
+          {when}
         </p>
       )}
 
-      {!top ? (
-        <div className="stack-empty">
-          <p className="big">Nothing waiting on you.</p>
-          <p className="sub">New posts from makers show up here.</p>
+      <div
+        className="post"
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+        aria-label={`${top.externalId} ${top.title}`}
+      >
+        <div className={`card${entering ? " in" : ""}`} style={cardStyle}>
+          {!m ? (
+            <div className="nomedia">No image yet</div>
+          ) : m.kind === "video" ? (
+            <video key={m.id} src={`/api/media/${m.id}`} controls playsInline preload="metadata" />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={m.id} src={`/api/media/${m.id}`} alt={`${PART[m.part]} ${m.position}`} draggable={false} />
+          )}
+        </div>
+      </div>
+
+      {media.length > 1 ? (
+        <div className="pager">
+          <button className="ib" onClick={() => setSlide((s) => (s - 1 + media.length) % media.length)} aria-label="Previous">
+            <Icon name="left" />
+          </button>
+          <span className="dots" aria-hidden>
+            {media.map((x, i) => (
+              <i key={x.id} className={i === slide ? "on" : undefined} />
+            ))}
+          </span>
+          {parts.size > 1 && m && <span className="part-label">{PART[m.part]}</span>}
+          <button className="ib" onClick={() => setSlide((s) => (s + 1) % media.length)} aria-label="Next">
+            <Icon name="right" />
+          </button>
         </div>
       ) : (
-        <>
-          <article
-            className={`rcard ${hint ? `hint-${hint}` : ""}`}
-            style={{ ...style, "--brand": top.brandColour } as React.CSSProperties}
-            onPointerDown={onDown}
-            onPointerMove={onMove}
-            onPointerUp={onUp}
-            onPointerCancel={onUp}
-            aria-label={`${top.externalId} ${top.title}`}
-          >
-            {hint && <div className={`stamp stamp-${hint}`}>{LABEL[hint]}</div>}
-            <header className="rcard-head">
-              <div className="badges">
-                <span className="badge-brand">
-                  <span className="brand-dot" aria-hidden />
-                  {top.brandName}
-                </span>
-                {[...new Set(top.channels.map((c) => c.platform))].map((p) => (
-                  <span key={p} className="badge">
-                    {PLATFORM[p] ?? p}
-                  </span>
-                ))}
-                {top.needsYes && <span className="pill st-approved">Needs your yes</span>}
-                {top.state === "held" && <span className="pill st-held">On hold</span>}
-                {top.missed && <span className="pill st-failed">Slot passed</span>}
-                {top.versionNumber && top.versionNumber > 1 && <span className="badge">v{top.versionNumber}</span>}
-              </div>
-              <h2>
-                <span className="post-id">{top.externalId}</span> {top.title}
-              </h2>
-              <p className="sub">
-                {when(top)} Manila · <a href={`/posts/${top.id}`}>Open</a>
-              </p>
-              {top.stateReason && top.state !== "approved" && <p className="reason">{top.stateReason}</p>}
-            </header>
+        <div className="gap" />
+      )}
 
-            {top.flags.length > 0 && (
-              <ul className="flag-list">
-                {top.flags.map((f, i) => (
-                  <li key={i} className={`flag flag-${f.code}`}>
-                    {f.text}
-                  </li>
-                ))}
-              </ul>
-            )}
+      {error && (
+        <p className="err" role="alert">
+          {error} <button onClick={() => location.reload()}>Reload</button>
+        </p>
+      )}
+      {loud.map((f, i) => (
+        <p key={i} className={`flag ${f.tone === "bad" ? "bad" : ""}`}>
+          <Icon name="warn" />
+          {f.text}
+        </p>
+      ))}
 
-            {top.media.length > 0 && (
-              <div className="media-scroll">
-                {top.media.map((m) =>
-                  m.kind === "video" ? (
-                    <video key={m.id} src={`/api/media/${m.id}`} controls playsInline preload="metadata" />
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={m.id} src={`/api/media/${m.id}`} alt={`${m.part} ${m.position}`} draggable={false} />
-                  ),
-                )}
-              </div>
-            )}
+      <p
+        className={`cap${details ? " open" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={details}
+        onClick={() => setDetails((d) => !d)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setDetails((d) => !d))}
+      >
+        {top.caption?.trim() || "No caption"}
+      </p>
 
-            <div className="rcard-caption">{top.caption?.trim() || <em>No caption</em>}</div>
-          </article>
+      <div className="acts">
+        <button className="sec" onClick={() => setSheet("send")} disabled={busy}>
+          Send back
+        </button>
+        <button className="pri" onClick={() => decide("approve")} disabled={busy}>
+          Approve
+        </button>
+      </div>
 
-          <div className="stack-actions">
-            <button className="act act-reject" onClick={() => decide("reject")} disabled={busy} aria-label="Drop">
-              ✕<span>Drop</span>
+      {sheet && <div className="scrim" onClick={() => setSheet(null)} />}
+      {sheet === "more" && (
+        <div className="sheet" role="dialog" aria-modal="true" aria-label="More actions">
+          <div className="grab" />
+          <h3>{top.title}</h3>
+          <dl className="det num">
+          <dt>Posts to</dt>
+          <dd>{channels.join(", ") || "No channels"}</dd>
+          <dt>Post</dt>
+          <dd>
+            {top.externalId}
+            {top.versionNumber ? `, version ${top.versionNumber}` : ""}
+          </dd>
+          {top.needsYes && (
+            <>
+              <dt>Status</dt>
+              <dd>Ready in the old queue, needs your yes here</dd>
+            </>
+          )}
+          {top.state === "held" && top.stateReason && (
+            <>
+              <dt>On hold</dt>
+              <dd>{top.stateReason}</dd>
+            </>
+          )}
+          {quiet.map((f, i) => (
+            <span key={i} style={{ display: "contents" }}>
+              <dt>Note</dt>
+              <dd>{f.text}</dd>
+            </span>
+          ))}
+            <dt />
+            <dd>
+              <Link href={`/posts/${top.id}`}>Open full post</Link>
+            </dd>
+          </dl>
+          <button className="opt" onClick={later} disabled={cards.length < 2}>
+            <b>Later</b>
+            <span>Move to the back of the pile</span>
+          </button>
+          {paged && new Set(cards.map((c) => c.brandSlug)).size > 1 && (
+            <button className="opt" onClick={() => skipPage(top.brandSlug)}>
+              <b>Skip {top.brandName} for now</b>
+              <span>Move this page&apos;s posts to the end</span>
             </button>
-            <button className="act act-revise" onClick={() => setComment("")} disabled={busy} aria-label="Send back">
-              ↺<span>Send back</span>
-            </button>
-            <button className="act act-later" onClick={later} disabled={busy || cards.length < 2} aria-label="Later">
-              ⤓<span>Later</span>
-            </button>
-            <button className="act act-approve" onClick={() => decide("approve")} disabled={busy} aria-label="Approve">
-              ✓<span>Approve</span>
-            </button>
+          )}
+          <button className="opt" onClick={() => decide("reject")}>
+            <b>Drop</b>
+            <span>Remove this post. The slot shows as open.</span>
+          </button>
+        </div>
+      )}
+      {sheet === "send" && (
+        <form
+          className="sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Send back to the maker"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (note.trim()) decide("revise", note);
+          }}
+        >
+          <div className="grab" />
+          <h3>Send back to the maker</h3>
+          <div className="chips">
+            {QUICK.map((q) => (
+              <button key={q} type="button" onClick={() => setNote((n) => (n ? `${n} ${q}.` : `${q}.`))}>
+                {q}
+              </button>
+            ))}
           </div>
-          <p className="stack-tip">Swipe right to approve, left to drop, up to send back.</p>
-        </>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What should change?"
+            aria-label="Note to the maker"
+            autoFocus
+            required
+          />
+          <button type="submit" className="pri" disabled={!note.trim() || busy}>
+            Send back
+          </button>
+        </form>
       )}
+    </div>
+  );
+}
 
-      {comment !== null && top && (
-        <div className="sheet" role="dialog" aria-label="Send back with a note">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!comment.trim()) return;
-              const note = comment;
-              setComment(null);
-              decide("revise", note);
-            }}
-          >
-            <h3>What needs to change on {top.externalId}?</h3>
-            <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4} autoFocus required />
-            <div className="sheet-actions">
-              <button type="button" onClick={() => setComment(null)}>
-                Cancel
-              </button>
-              <button type="submit" className="primary" disabled={!comment.trim()}>
-                Send back
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {undo && (
-        <div className="toast" role="status">
-          {LABEL[undo.act]} {undo.card.externalId}
-          <button onClick={doUndo}>Undo ({Math.max(0, Math.ceil((undo.until - Date.now()) / 1000))})</button>
-        </div>
-      )}
+/** One progress segment per page, sized by its post count; the current page is tinted. */
+function Segments({ order, left, current }: { order: { id: number; brandSlug: string }[]; left: Set<number>; current?: string }) {
+  const groups = groupByPage(order);
+  const done = order.filter((o) => !left.has(o.id)).length;
+  return (
+    <div className="segs" role="progressbar" aria-label={`${done} of ${order.length} done, ${groups.length} pages`} aria-valuenow={done} aria-valuemax={order.length}>
+      {groups.map((g) => {
+        const d = g.items.filter((o) => !left.has(o.id)).length;
+        return (
+          <i key={g.slug} className={g.slug === current ? "cur" : undefined} style={{ flex: g.items.length }}>
+            <b style={{ width: `${Math.round((100 * d) / g.items.length)}%` }} />
+          </i>
+        );
+      })}
     </div>
   );
 }

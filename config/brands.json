@@ -9,6 +9,7 @@
       "approvers": ["nath"],
       "postIdPattern": "^A[0-9]",
       "rootEnv": "PINCH_ANDAR_ROOT",
+      "rules": ["No photos of Nath's or Ac's faces"],
       "queue": {
         "csv": "_Post Queue/post-queue.csv",
         "postizState": "_Post Queue/postiz-state.json"
