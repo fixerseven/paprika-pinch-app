@@ -4,6 +4,10 @@ import { COOKIE, approverName, authEnabled, checkPasscode, makeSession } from "@
 export const dynamic = "force-dynamic";
 
 const attempts = new Map<string, { n: number; until: number }>();
+// Pinch is reachable from the internet once the Claude connector is on, so also cap wrong
+// tries from everywhere together: 20 in an hour pauses sign-in for 15 minutes.
+let wrongTimes: number[] = [];
+let pausedUntil = 0;
 
 /**
  * Redirect with a relative Location. Behind `tailscale serve`, req.url is
@@ -27,11 +31,16 @@ export async function POST(req: Request) {
   if (!authEnabled()) return go(next);
 
   // Slow down guessing: five wrong tries locks this client out for five minutes.
-  const who = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
+  const who = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for")?.split(",")[0].trim() || "local";
   const a = attempts.get(who);
-  if (a && a.until > Date.now()) return back("locked");
+  if ((a && a.until > Date.now()) || pausedUntil > Date.now()) return back("locked");
 
   if (!checkPasscode(String(form.get("passcode") ?? ""))) {
+    wrongTimes = [...wrongTimes.filter((t) => t > Date.now() - 3600_000), Date.now()];
+    if (wrongTimes.length >= 20) {
+      pausedUntil = Date.now() + 15 * 60_000;
+      wrongTimes = [];
+    }
     const n = (a && a.until <= Date.now() && a.n >= 5 ? 0 : a?.n ?? 0) + 1;
     attempts.set(who, { n, until: n >= 5 ? Date.now() + 5 * 60_000 : 0 });
     return back("wrong");
